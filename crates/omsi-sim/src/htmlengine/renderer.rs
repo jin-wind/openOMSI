@@ -323,6 +323,10 @@ impl HtmlRenderer for EngineRenderer {
                 }
             }
             PointerKind::Move => self.dispatch(node, "mousemove", x, y),
+            PointerKind::Cancel => {
+                self.pressed = false;
+                self.dispatch(node, "pointercancel", x, y);
+            }
         }
     }
 

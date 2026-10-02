@@ -11,7 +11,18 @@ pub(crate) struct Shell {
 impl Shell {
     #[cfg(target_os = "ios")]
     pub(crate) fn with_launcher(launcher: launcher::Launcher) -> Self {
-        Self { launcher: Some(Box::new(launcher)), game: None }
+        Self {
+            launcher: Some(Box::new(launcher)),
+            game: None,
+        }
+    }
+
+    #[cfg(target_os = "ios")]
+    pub(crate) fn with_game(game: App) -> Self {
+        Self {
+            launcher: None,
+            game: Some(Box::new(game)),
+        }
     }
 
     fn launcher(&mut self) -> &mut launcher::Launcher {
@@ -48,7 +59,9 @@ impl Shell {
             launcher.resumed(event_loop);
             return;
         }
-        let Some(line) = omsi_launcher_lib::take_in_process_launch() else { return };
+        let Some(line) = omsi_launcher_lib::take_in_process_launch() else {
+            return;
+        };
         #[cfg(target_os = "android")]
         crate::android::prepare_drive();
         log::info!("starting the game: {}", line.join(" "));
@@ -104,10 +117,22 @@ impl ApplicationHandler for Shell {
         self.switch(event_loop);
     }
 
-    fn device_event(&mut self, event_loop: &ActiveEventLoop, id: winit::event::DeviceId, event: DeviceEvent) {
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
         if let Some(game) = self.game.as_mut() {
             game.device_event(event_loop, id, event);
         }
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ()) {
+        if let Some(game) = self.game.as_mut() {
+            game.user_event(event_loop, event);
+        }
+        self.switch(event_loop);
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {

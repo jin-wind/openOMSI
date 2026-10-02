@@ -48,7 +48,8 @@ impl ApplicationHandler for App {
 
     /// A phone put the app into the background: its window's surface goes (made again on
     /// `resumed`), the fingers and the held keys are let go.
-    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        self.cancel_touches(event_loop);
         self.surface = None;
         self.touch.drop_gpu();
         self.keys.clear();
@@ -66,6 +67,8 @@ impl ApplicationHandler for App {
                 crate::platform::exit(event_loop);
             }
             WindowEvent::Resized(size) => {
+                #[cfg(target_os = "ios")]
+                let size = self.window.as_ref().map(|w| crate::platform::surface_size(w)).unwrap_or(size);
                 if let (Some(s), Some(r)) = (self.surface.as_mut(), self.renderer.as_ref()) {
                     s.resize(r, size.width, size.height);
                 }
@@ -77,6 +80,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Focused(false) => {
+                self.cancel_touches(event_loop);
                 self.finish_vr_nav_edit();
                 self.window_focused = false;
                 if let Some(ctl) = self.controllers.as_mut() {
@@ -2415,7 +2419,7 @@ impl ApplicationHandler for App {
                         self.renderer.as_ref(),
                         self.window.as_ref(),
                     ) {
-                        let size = win.inner_size();
+                        let size = crate::platform::surface_size(win);
                         s.resize(r, size.width, size.height);
                     }
                 }

@@ -90,6 +90,17 @@ fn a_click_needs_a_press_and_a_release() {
 }
 
 #[test]
+fn a_cancelled_press_does_not_click_on_release() {
+    let mut r = EngineRenderer::new(200, 100, KEYPAD);
+    r.pointer(20.0, 10.0, PointerKind::Down);
+    r.pointer(20.0, 10.0, PointerKind::Cancel);
+    r.pointer(20.0, 10.0, PointerKind::Up);
+    assert!(r.take_events().is_empty());
+    click(&mut r, 20.0, 10.0);
+    assert_eq!(r.take_events().len(), 1);
+}
+
+#[test]
 fn inline_blocks_wrap_and_shrink_to_fit() {
     let html = "<style>body{margin:0;width:100px;height:100px}.k{display:inline-block;width:30px;height:10px;margin:0}</style>\
         <body><div class=k onclick=\"omsi.setVar('k',1)\"></div><div class=k onclick=\"omsi.setVar('k',2)\"></div>\

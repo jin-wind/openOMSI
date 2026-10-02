@@ -1,0 +1,81 @@
+# Experimental portability checks; artifacts require device signing/provisioning.
+name: iOS Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - 'scripts/build-ios.sh'
+      - 'scripts/version.sh'
+      - 'VERSION'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'ios/**'
+      - 'scripts/build-ios.sh'
+      - 'scripts/version.sh'
+      - 'VERSION'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  IOS_MIN_VERSION: '15.0'
+
+jobs:
+  build:
+    name: Experimental ${{ matrix.platform }} arm64
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: iphoneos
+            target: aarch64-apple-ios
+            artifact: ios-device-sideload
+          - platform: iphonesimulator
+            target: aarch64-apple-ios-sim
+            artifact: ios-simulator
+    env:
+      IOS_PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Identify SDK and native cache directory
+        id: sdk
+        run: |
+          sdk_version="$(xcrun --sdk "$IOS_PLATFORM" --show-sdk-version)"
+          printf 'version=%s\n' "$sdk_version" >> "$GITHUB_OUTPUT"
+          printf 'target-dir=target/ios/%s-min-%s-sdk-%s\n' \
+            "$IOS_PLATFORM" "$IOS_MIN_VERSION" "$sdk_version" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-${{ matrix.platform }}-${{ env.IOS_MIN_VERSION }}-${{ steps.sdk.outputs.version }}
+          workspaces: . -> ${{ steps.sdk.outputs.target-dir }}
+      - name: Build app and IPA
+        run: scripts/build-ios.sh
+      - name: Upload experimental package
+        uses: actions/upload-artifact@v4
+        with:
+          name: openOMSI-${{ matrix.artifact }}-arm64
+          path: dist/openOMSI-*-${{ matrix.artifact }}.ipa
+          if-no-files-found: error

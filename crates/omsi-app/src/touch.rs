@@ -137,6 +137,7 @@ pub struct Touch {
     /// Physical pixels per point of the layout.
     u: f32,
     size: (f32, f32),
+    bounds: Rect,
     gpu: Option<(Gpu, wgpu::TextureFormat)>,
     shot_gpu: Option<Gpu>,
     fonts: Option<Fonts>,
@@ -174,6 +175,7 @@ impl Touch {
             stick_r: 1.0,
             u: 1.0,
             size: (1.0, 1.0),
+            bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             gpu: None,
             shot_gpu: None,
             fonts: None,
@@ -193,6 +195,37 @@ impl Touch {
                 b.rect.pad(4.0 * self.u, 4.0 * self.u).contains(p)
             }
         })
+    }
+
+    fn reset_inputs(&mut self) {
+        self.fingers.clear();
+        self.steer = 0.0;
+        self.steering = false;
+        self.throttle = 0.0;
+        self.brake = 0.0;
+        self.clutch = 0.0;
+        self.pinch = None;
+        self.stick_keys.clear();
+        self.stick_at = None;
+    }
+
+    fn place_layout(&mut self, bounds: Rect, size: (f32, f32)) {
+        let offset = Vec2::new(bounds.x, bounds.y);
+        // Menus and hidden controls only lay out their top-bar buttons.
+        if !self.hidden && self.buttons.first().is_some_and(|b| b.btn == Btn::Menu) {
+            self.wheel_c += offset;
+            self.stick_c += offset;
+            for rect in [&mut self.throttle_r, &mut self.brake_r, &mut self.clutch_r] {
+                rect.x += offset.x;
+                rect.y += offset.y;
+            }
+        }
+        for button in &mut self.buttons {
+            button.rect.x += offset.x;
+            button.rect.y += offset.y;
+        }
+        self.bounds = bounds;
+        self.size = size;
     }
 
     /// The window's graphics went away (a phone put the app in the background).
@@ -375,7 +408,7 @@ impl App {
             push(&mut b, Btn::Horn, rb(t.wheel_c.x + t.wheel_r + 18.0 * u + hr, h - pad - hr, hr), "campaign", "", false, true);
             // --- the cab panel: the rest of the switches, over the middle
             if t.panel {
-                let items: Vec<(Btn, &'static str, &str, bool)> = vec![
+                let mut items: Vec<(Btn, &'static str, &str, bool)> = vec![
                     (Btn::Battery, "power_settings_new", "Battery", p.vehicle.var("elec_busbar_main").or_else(|| p.vehicle.var("bat_switch")).is_some_and(|v| v > 0.5)),
                     (Btn::Engine, "key", "Engine start (hold)", p.vehicle.var("engine_on").is_some_and(|v| v > 0.5)),
                     (Btn::AutoStart, "autorenew", "Start the bus by itself", false),
@@ -389,6 +422,7 @@ impl App {
                     (Btn::Info, "info", "Information bar", self.info_bar),
                     (Btn::Tilt, "screen_rotation", "Tilt steering", t.tilt),
                 ];
+                items.retain(|(btn, ..)| *btn != Btn::Tilt || crate::platform::TILT_STEERING);
                 let cols = 4;
                 let cw = 150.0 * u;
                 let ch = 64.0 * u;
@@ -422,6 +456,40 @@ impl App {
             TouchPhase::Moved => self.finger_move(f.id, p),
             TouchPhase::Ended => self.finger_up(event_loop, f.id, p, false),
             TouchPhase::Cancelled => self.finger_up(event_loop, f.id, p, true),
+        }
+    }
+
+    /// Release held bus switches as well as axes when the OS takes away the touches.
+    pub(crate) fn cancel_touches(&mut self, event_loop: &ActiveEventLoop) {
+        let fingers: Vec<_> = self.touch.fingers.iter().map(|f| (f.id, f.pos)).collect();
+        for (id, pos) in fingers {
+            self.finger_up(event_loop, id, pos, true);
+        }
+        self.cancel_pointer();
+        self.touch.reset_inputs();
+        self.buttons_held = (false, false);
+        self.mouse_look = false;
+        self.both_drag = None;
+        self.menu_scroll_drag = false;
+        self.mouse_edge = 0.0;
+        self.dragging = false;
+        self.drag_delta = (0.0, 0.0);
+        if let Some(player) = self.player.as_mut() {
+            player.analog = Default::default();
+        }
+    }
+
+    fn cancel_pointer(&mut self) {
+        if let Some(player) = self.player.as_mut() {
+            player.cancel_press();
+            if let Some((page, u, v)) = self.html_pressed.take() {
+                player.html_pointer(page, u, v, omsi_sim::htmltex::PointerKind::Cancel);
+            }
+        }
+        if let Some((id, page, u, v)) = self.html_object_pressed.take() {
+            if let Some(world) = self.world.as_ref() {
+                world.html_object_pointer(id, page, u, v, omsi_sim::htmltex::PointerKind::Cancel);
+            }
         }
     }
 
@@ -600,6 +668,9 @@ impl App {
                 self.stick_keys(Vec2::ZERO);
             }
             Role::Cockpit | Role::Mouse => {
+                if cancelled {
+                    self.cancel_pointer();
+                }
                 self.on_cursor(p.x, p.y);
                 self.left_button(event_loop, false);
             }
@@ -862,7 +933,8 @@ impl App {
         let speed = self.player.as_ref().map(|p| p.vehicle.physics.velocity_kmh().abs());
         // (the buttons' backgrounds follow the interface's opacity; their icons stay solid)
         let panel_bg = PANEL_BG.alpha(crate::ui::backdrop(self.settings.ui_opacity));
-        let (w, h) = self.touch.size;
+        let bounds = self.touch.bounds;
+        let (w, h) = (bounds.w, bounds.h);
         let t = &mut self.touch;
         let u = t.u;
         let fonts = t.fonts.get_or_insert_with(Fonts::new);
@@ -919,7 +991,7 @@ impl App {
                 pt.text(atlas, fonts, name, 11.0 * u, Weight::Bold, Vec2::new(r.center().x, r.bottom() - 10.0 * u), Align::Center, DIM);
             }
             if let Some(v) = speed {
-                let at = Vec2::new(w * 0.5, h - 22.0 * u);
+                let at = Vec2::new(bounds.x + w * 0.5, bounds.bottom() - 22.0 * u);
                 let s = format!("{v:.0} km/h");
                 let tw = fonts.width(&s, 20.0 * u, Weight::Bold);
                 pt.rounded(Rect::new(at.x - tw * 0.5 - 12.0 * u, at.y - 24.0 * u, tw + 24.0 * u, 34.0 * u), 10.0 * u, panel_bg);
@@ -974,7 +1046,7 @@ impl App {
             let a = left.clamp(0.0, 0.4) / 0.4;
             let s = omsi_ui::tr(&note).to_string();
             let tw = fonts.width(&s, 15.0 * u, Weight::Medium);
-            let at = Vec2::new(w * 0.5, h * 0.42);
+            let at = Vec2::new(bounds.x + w * 0.5, bounds.y + h * 0.42);
             pt.rounded(Rect::new(at.x - tw * 0.5 - 16.0 * u, at.y - 24.0 * u, tw + 32.0 * u, 36.0 * u), 12.0 * u, Color::rgba(10, 12, 16, 0.8 * a));
             pt.text(atlas, fonts, &s, 15.0 * u, Weight::Medium, at, Align::Center, TEXT.alpha(a));
         }
@@ -986,7 +1058,15 @@ impl App {
         if !self.touch.enabled {
             return;
         }
-        self.touch_layout(w as f32, h as f32);
+        let bounds = Rect::new(0.0, 0.0, w as f32, h as f32);
+        #[cfg(target_os = "ios")]
+        let bounds = self.window.as_ref().map(|window| {
+            let origin = crate::platform::ui_origin(window);
+            let safe = window.inner_size();
+            Rect::new(origin.x, origin.y, safe.width as f32, safe.height as f32)
+        }).unwrap_or(bounds);
+        self.touch_layout(bounds.w, bounds.h);
+        self.touch.place_layout(bounds, (w as f32, h as f32));
         self.touch_paint();
     }
 
@@ -1078,4 +1158,63 @@ const WHEEL_LOCK_ANGLE: f32 = 3.0 * std::f32::consts::PI;
 /// faster as the finger went on round).
 fn steer_curve(s: f32) -> f32 {
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_area_controls_use_full_window_touch_coordinates() {
+        let mut touch = Touch::new();
+        touch.u = 1.0;
+        touch.buttons.push(Button {
+            btn: Btn::Menu,
+            rect: Rect::new(12.0, 12.0, 42.0, 42.0),
+            icon: "menu",
+            label: String::new(),
+            on: false,
+            round: true,
+        });
+        touch.wheel_c = Vec2::new(98.0, 1034.0);
+        touch.throttle_r = Rect::new(2150.0, 950.0, 64.0, 150.0);
+        let safe = Rect::new(186.0, 0.0, 2250.0, 1146.0);
+        touch.place_layout(safe, (2622.0, 1206.0));
+
+        assert_eq!(touch.button_at(Vec2::new(219.0, 33.0)), Some(0));
+        assert_eq!(touch.button_at(Vec2::new(33.0, 33.0)), None);
+        assert!(safe.contains(touch.wheel_c));
+        assert!(safe.contains(touch.throttle_r.center()));
+        assert_eq!(touch.size, (2622.0, 1206.0));
+    }
+
+    #[test]
+    fn cancelled_input_cannot_keep_pedals_or_camera_stick_engaged() {
+        let mut touch = Touch::new();
+        touch.fingers.push(Touched {
+            id: 1,
+            start: Vec2::ZERO,
+            pos: Vec2::ZERO,
+            role: Role::Throttle,
+            moved: false,
+            since: Instant::now(),
+        });
+        touch.throttle = 1.0;
+        touch.brake = 0.7;
+        touch.clutch = 1.0;
+        touch.steer = 0.6;
+        touch.steering = true;
+        touch.pinch = Some(30.0);
+        touch.stick_keys.push(KeyCode::KeyW);
+        touch.stick_at = Some((Vec2::ZERO, Vec2::Y));
+
+        touch.reset_inputs();
+
+        assert!(touch.fingers.is_empty());
+        assert_eq!((touch.throttle, touch.brake, touch.clutch, touch.steer), (0.0, 0.0, 0.0, 0.0));
+        assert!(!touch.steering);
+        assert!(touch.pinch.is_none());
+        assert!(touch.stick_keys.is_empty());
+        assert!(touch.stick_at.is_none());
+    }
 }

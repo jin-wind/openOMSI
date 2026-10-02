@@ -18,6 +18,8 @@ mod openxr;
 mod mac_hid;
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_os = "ios")]
+mod ios;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod mobile_shell;
 mod platform;
@@ -147,6 +149,9 @@ pub fn run() -> Result<()> {
     restart_with_allocator_settings();
     #[cfg(windows)]
     attach_parent_console();
+    #[cfg(target_os = "ios")]
+    ios::init_log();
+    #[cfg(not(target_os = "ios"))]
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     // a panic goes into the log (which the launcher keeps per session) with where it
     // happened and a backtrace, not only to a terminal that may not be there
@@ -191,6 +196,9 @@ pub fn run() -> Result<()> {
     quit::install(move |_| {
         let _ = proxy.send_event(());
     });
+    #[cfg(target_os = "ios")]
+    let mut app = mobile_shell::Shell::with_game(app);
+    #[cfg(not(target_os = "ios"))]
     let mut app = app;
     let r = event_loop.run_app(&mut app);
     // the host's mods of this session go with it

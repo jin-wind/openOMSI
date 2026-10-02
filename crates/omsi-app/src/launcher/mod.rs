@@ -267,14 +267,29 @@ impl Launcher {
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     pub fn release_window(&mut self) -> Option<Arc<Window>> {
         self.pages.pads.cancel_feedback_test();
+        self.cancel_input();
+        if let Some(window) = self.window.as_ref() {
+            window.set_ime_allowed(false);
+        }
         self.surface = None;
         self.gpu = None;
         self.preview_tex = None;
         self.showroom = showroom::Showroom::new();
         self.preview_gen = 0;
         self.renderer = None;
+        self.ui.focus = None;
         self.ime = false;
         self.window.take()
+    }
+
+    fn cancel_input(&mut self) {
+        self.fingers = mobile::Fingers::default();
+        self.dragging = None;
+        self.release_next = false;
+        self.modifiers = ModifiersState::empty();
+        self.ui.input = ui::Input::default();
+        self.ui.input.mouse = Vec2::splat(-1e4);
+        self.ui.active = None;
     }
 
     /// Back from a game: the window again (the launcher draws into it from the next resume).
@@ -305,7 +320,7 @@ impl Launcher {
             self.renderer = Some(renderer);
         }
         let Some(renderer) = self.renderer.as_ref() else { return };
-        let size = window.inner_size();
+        let size = crate::platform::surface_size(&window);
         self.surface = SurfaceState::new_with(&self.instance, window.clone(), renderer, size.width.max(1), size.height.max(1), true).ok();
         self.last = Instant::now();
     }
@@ -322,6 +337,8 @@ impl ApplicationHandler for Launcher {
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         // (a phone: the app went to the background and its window's surface goes with it)
+        self.pages.pads.cancel_feedback_test();
+        self.cancel_input();
         self.surface = None;
     }
 
@@ -358,7 +375,7 @@ impl ApplicationHandler for Launcher {
                 return;
             }
         };
-        let size = window.inner_size();
+        let size = crate::platform::surface_size(&window);
         let surface = match SurfaceState::new_with(&self.instance, window.clone(), &renderer, size.width, size.height, true) {
             Ok(s) => s,
             Err(e) => {
@@ -388,11 +405,17 @@ impl ApplicationHandler for Launcher {
             WindowEvent::Touch(t) => self.touch(t, scale),
             WindowEvent::Focused(f) => {
                 self.focused = f;
-                if !f { self.pages.pads.cancel_feedback_test(); }
+                if !f {
+                    self.pages.pads.cancel_feedback_test();
+                    self.cancel_input();
+                }
             }
             WindowEvent::Occluded(o) => {
                 self.occluded = o;
-                if o { self.pages.pads.cancel_feedback_test(); }
+                if o {
+                    self.pages.pads.cancel_feedback_test();
+                    self.cancel_input();
+                }
             }
             WindowEvent::Resized(s) => {
                 if let (Some(sf), Some(r)) = (self.surface.as_mut(), self.renderer.as_ref()) {
@@ -457,6 +480,15 @@ impl ApplicationHandler for Launcher {
                     return;
                 }
                 let cmd = self.modifiers.control_key() || self.modifiers.super_key();
+                // UIKit's keyboard sends Return as text with no physical key code.
+                if cfg!(target_os = "ios")
+                    && matches!(event.physical_key, PhysicalKey::Unidentified(_))
+                    && (event.logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter)
+                        || matches!(event.text.as_deref(), Some("\n" | "\r" | "\r\n")))
+                {
+                    self.ui.input.keys.push(Key::Enter);
+                    return;
+                }
                 // a phone's back key: out of the storage browser, else like Escape
                 if event.physical_key == PhysicalKey::Code(KeyCode::BrowserBack) {
                     if self.browser.is_some() {

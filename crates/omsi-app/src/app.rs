@@ -296,7 +296,7 @@ impl App {
             // back from the background (a phone): the window's surface is made again
             if self.surface.is_none() {
                 if let Some(r) = self.renderer.as_ref() {
-                    let size = window.inner_size();
+                    let size = crate::platform::surface_size(&window);
                     let vsync = self.settings.vsync && !self.vr_active();
                     self.surface = SurfaceState::new_with(&self.instance, window.clone(), r, size.width.max(1), size.height.max(1), vsync).ok();
                     self.last = Instant::now();
@@ -361,7 +361,7 @@ impl App {
         }
         crate::lights::load_smoke_texture(&mut renderer, &self.args.root);
         crate::lights::set_corona_root(&self.args.root);
-        let size = window.inner_size();
+        let size = crate::platform::surface_size(&window);
         let surface = match SurfaceState::new_with(
             &self.instance,
             window.clone(),

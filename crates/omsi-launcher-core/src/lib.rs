@@ -2204,7 +2204,7 @@ pub fn launch(d: &Duty) -> Result<Launched> {
         let command = args.join(" ");
         log_to_file(&format!("game in this process: {command}"));
         *IN_PROCESS.lock().unwrap_or_else(|e| e.into_inner()) = Some(args);
-        return Ok(Launched { pid: std::process::id(), log: data_dir().join("game.log").to_string_lossy().to_string(), command, others: 0 });
+        return Ok(Launched { pid: std::process::id(), log: in_process_log_path().to_string_lossy().to_string(), command, others: 0 });
     }
     let c = load_config();
     let game = find_game(&c.game).context("the game binary was not found (set it under Setup)")?;
@@ -2299,6 +2299,22 @@ pub fn take_in_process_launch() -> Option<Vec<String>> {
 
 /// Whether games run inside the launcher's own process (a phone).
 pub const IN_PROCESS_GAMES: bool = cfg!(any(target_os = "android", target_os = "ios"));
+
+/// The shared process's game log; iOS exposes it through Files alongside the content.
+pub fn in_process_log_path() -> PathBuf {
+    #[cfg(target_os = "ios")]
+    {
+        let content = std::env::var_os("OMSI_CONTENT")
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home().join("Documents").join("Content"));
+        content.join("Logs").join("game.log")
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        data_dir().join("game.log")
+    }
+}
 
 pub use instances::{list as list_instances, log_tail, stop as stop_instance, Instance};
 

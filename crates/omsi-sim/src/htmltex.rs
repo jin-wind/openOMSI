@@ -9,6 +9,7 @@ pub enum PointerKind {
     Down,
     Up,
     Move,
+    Cancel,
 }
 
 /// Something a page asks of the vehicle beyond a variable or a trigger: the IBIS duty.

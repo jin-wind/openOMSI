@@ -1609,6 +1609,16 @@ impl Player {
     }
 
     pub(crate) fn release(&mut self) {
+        self.release_press(true);
+    }
+
+    /// An interrupted gesture releases its trigger without completing a click.
+    pub(crate) fn cancel_press(&mut self) {
+        self.release_press(false);
+        self.auto_drag = None;
+    }
+
+    fn release_press(&mut self, complete_click: bool) {
         if let Some(i) = self.pressed_mesh.take() {
             let ty = self.vehicle.ty.clone();
             let def = &ty.model.meshes[ty.meshes[i].def_index];
@@ -1618,7 +1628,7 @@ impl Player {
                 // other end (a click opened the NL/NG driver's door by the mouse's jitter
                 // and a second click never shut it again)
                 let anim = def.animations.first().map(|a| a.variable.clone()).filter(|v| !v.trim().is_empty() && v.trim().parse::<f32>().is_err());
-                if let (false, true, Some(var)) = (self.press_info.0, self.press_info.1 < 4.0, anim) {
+                if let (true, false, true, Some(var)) = (complete_click, self.press_info.0, self.press_info.1 < 4.0, anim) {
                     let now = self.vehicle.var(&var).unwrap_or(0.0);
                     let target = if now > 0.5 { 0.0 } else { 1.0 };
                     log::info!("mouse event {ev}: a click on a drag control, {var} {now:.2} -> {target}");

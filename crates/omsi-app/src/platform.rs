@@ -10,6 +10,17 @@ use winit::event_loop::ActiveEventLoop;
 /// Built for a phone or a tablet.
 pub const MOBILE: bool = cfg!(any(target_os = "android", target_os = "ios"));
 
+/// Whether this build has a tilt sensor backend.
+pub const TILT_STEERING: bool = cfg!(target_os = "android");
+
+/// The Metal layer covers the whole UIKit window, including its safe-area insets.
+pub(crate) fn surface_size(window: &winit::window::Window) -> winit::dpi::PhysicalSize<u32> {
+    #[cfg(target_os = "ios")]
+    { window.outer_size() }
+    #[cfg(not(target_os = "ios"))]
+    { window.inner_size() }
+}
+
 /// UIKit chooses the phone's screen size; desktop dimensions would make an oversized
 /// UIWindow and crop most of the interface off screen.
 pub(crate) fn window_attributes(attrs: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
