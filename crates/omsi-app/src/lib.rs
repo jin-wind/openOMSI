@@ -20,6 +20,8 @@ mod mac_hid;
 mod android;
 #[cfg(target_os = "ios")]
 mod ios;
+#[cfg(any(target_os = "ios", test))]
+mod ios_gamepad;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod mobile_shell;
 mod platform;

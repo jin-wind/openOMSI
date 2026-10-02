@@ -225,6 +225,8 @@ pub(crate) const HAT_BUTTONS: usize = 128;
 /// never show up in the system's newer interface that gilrs uses there.
 pub(crate) struct Devices {
     gilrs: Option<Gilrs>,
+    #[cfg(target_os = "ios")]
+    apple: crate::ios_gamepad::Gamepads,
     #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
     calibration_wheel: Option<crate::evdev_ff::Wheel>,
     #[cfg(windows)]
@@ -243,13 +245,18 @@ impl Devices {
         // without gilrs's default filters: its dead zone took 10 % of every axis - on a
         // wheel of 1800 degrees, 90 degrees either side of the middle did nothing - and its
         // jitter filter held back small movements; the settings' dead zone is the only one
+        #[cfg(not(target_os = "ios"))]
         let gilrs = gilrs::GilrsBuilder::new().with_default_filters(false).build().map_err(|e| log::info!("game controllers: {e}")).ok();
+        #[cfg(target_os = "ios")]
+        let gilrs = None;
         #[cfg(windows)]
         let di = hwnd.and_then(|h| crate::dinput::DirectInput::new(h, ff));
         #[cfg(not(windows))]
         let _ = (hwnd, ff);
         Devices {
             gilrs,
+            #[cfg(target_os = "ios")]
+            apple: Default::default(),
             #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
             calibration_wheel: None,
             #[cfg(windows)]
@@ -285,6 +292,8 @@ impl Devices {
 
     /// Release foreground wheel effects when the game loses focus.
     pub(crate) fn set_focus(&mut self, focused: bool) {
+        #[cfg(target_os = "ios")]
+        self.apple.set_focus(focused);
         #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
         if !focused {
             self.calibration_wheel = None;
@@ -316,6 +325,8 @@ impl Devices {
     /// (device, button number from 0, as DirectInput and `gamectrler.cfg` count them).
     pub fn poll(&mut self) -> Vec<(String, usize, bool)> {
         let mut out = Vec::new();
+        #[cfg(target_os = "ios")]
+        out.extend(self.apple.poll());
         let di = self.direct_input();
         #[cfg(windows)]
         let xinput_pads = self.gilrs.as_ref().is_some_and(|g| g.gamepads().any(|(_, p)| xinput_name(p.name())));
@@ -367,6 +378,15 @@ impl Devices {
     /// The devices connected, with their axes as last read.
     pub fn connected(&self) -> Vec<Connected> {
         let mut v = Vec::new();
+        #[cfg(target_os = "ios")]
+        for pad in &self.apple.pads {
+            v.push(Connected {
+                name: pad.name.clone(), hardware_id: None,
+                axes: pad.axes.iter().enumerate().map(|(i, &v)| (i, if i >= 4 { v * 2.0 - 1.0 } else { v })).collect(),
+                gamepad: true, ff: false, ff_capable: false,
+                buttons: crate::ios_gamepad::BUTTON_COUNT,
+            });
+        }
         // (Windows: an Xbox-type pad is gilrs's - the system's own layout -, everything else
         // DirectInput's; a wheel that a community mapping makes a "gamepad" in gilrs was
         // listed twice, "Logitech G29" beside "G29 Driving Force Racing Wheel")
@@ -515,6 +535,8 @@ pub struct Controllers {
     pub steer_gain: f32,
     /// Key actions of buttons pressed (true) and released (false) since the last poll.
     pub actions: Vec<(String, bool)>,
+    #[cfg(target_os = "ios")]
+    held_apple_buttons: Vec<(String, usize, String)>,
     /// Devices told about in the log (and on the screen) as not set up.
     announced: Vec<String>,
     /// A message for the screen: a wheel that is not set up.
@@ -560,7 +582,7 @@ impl Controllers {
         for c in devices.connected() {
             log::info!("game controller: {} ({})", c.name, if cfg.iter().any(|d| names_match(&d.name, &c.name)) { "set up in gamectrler.cfg" } else if c.gamepad { "as a gamepad" } else { "not set up: its X axis steers" });
         }
-        Controllers { devices, focused: true, cfg, deadzone: 0.0, pedal_throttle: 1.0, pedal_brake: 1.0, disabled: Vec::new(), ff_invert: false, ff_enabled: true, steer_gain: 1.0, enabled: true, actions: Vec::new(), announced: Vec::new(), notice: None, steer: None, ff_t: 0.0, ff_lateral: 0.0, ff_bump: 0.0, ff_bump_age: 0.0, ff_source_logged: None, rumble: None, #[cfg(all(target_os = "linux", target_pointer_width = "64"))] wheel: None, #[cfg(all(target_os = "linux", target_pointer_width = "64"))] wheel_tried: None }
+        Controllers { devices, focused: true, cfg, deadzone: 0.0, pedal_throttle: 1.0, pedal_brake: 1.0, disabled: Vec::new(), ff_invert: false, ff_enabled: true, steer_gain: 1.0, enabled: true, actions: Vec::new(), #[cfg(target_os = "ios")] held_apple_buttons: Vec::new(), announced: Vec::new(), notice: None, steer: None, ff_t: 0.0, ff_lateral: 0.0, ff_bump: 0.0, ff_bump_age: 0.0, ff_source_logged: None, rumble: None, #[cfg(all(target_os = "linux", target_pointer_width = "64"))] wheel: None, #[cfg(all(target_os = "linux", target_pointer_width = "64"))] wheel_tried: None }
     }
 
     /// A wheel or joystick steers the bus (then the arrow keys look around, as in OMSI:
@@ -572,14 +594,52 @@ impl Controllers {
     /// Read the devices: the analog controls, and the button actions into `actions`.
     pub fn poll(&mut self) -> Analog {
         let mut out = Analog::default();
+        #[cfg(target_os = "ios")]
+        {
+            // Settings can disable a device while a button is held. Release the action
+            // originally pressed even if the mapping or enabled state has since changed.
+            let mut held = std::mem::take(&mut self.held_apple_buttons);
+            held.retain(|(name, _, action)| {
+                if !self.enabled || !self.focused || self.off(name) {
+                    self.actions.push((action.clone(), false));
+                    false
+                } else { true }
+            });
+            self.held_apple_buttons = held;
+        }
         for (name, n, down) in self.devices.poll() {
+            #[cfg(target_os = "ios")]
+            {
+                if !down {
+                    if let Some(i) = self.held_apple_buttons.iter().position(|(device, button, _)| *device == name && *button == n) {
+                        let (_, _, action) = self.held_apple_buttons.remove(i);
+                        self.actions.push((action, false));
+                    }
+                } else if self.enabled && self.focused && !self.off(&name) {
+                    let action = match find_device_cfg(&self.cfg, &name).and_then(|d| d.buttons.get(n)) {
+                        Some((action, _)) => (!action.is_empty()).then_some(action.as_str()),
+                        None => crate::ios_gamepad::default_action(n),
+                    };
+                    if let Some(action) = action {
+                        let action = action.to_string();
+                        log::info!("game controller {}: button {} -> {}", name, n, action);
+                        self.held_apple_buttons.push((name.clone(), n, action.clone()));
+                        self.actions.push((action, true));
+                    }
+                }
+            }
+            #[cfg(not(target_os = "ios"))]
+            {
             if self.off(&name) {
                 continue;
             }
             if let Some(action) = find_device_cfg(&self.cfg, &name).and_then(|d| d.buttons.get(n)).filter(|a| !a.0.is_empty()) {
                 self.actions.push((action.0.clone(), down));
             }
+            }
         }
+        #[cfg(target_os = "ios")]
+        if !self.focused { return out; }
         if !self.enabled {
             return out;
         }
@@ -656,6 +716,23 @@ impl Controllers {
             }
         }
         // gamepads: the left stick steers, the triggers are the pedals
+        #[cfg(target_os = "ios")]
+        for pad in &self.devices.apple.pads {
+            if self.off(&pad.name) || find_device_cfg(&self.cfg, &pad.name).is_some_and(|d| d.axes.iter().any(Option::is_some)) {
+                continue;
+            }
+            let x = pad.axes[0];
+            if x.abs() > 0.5 && !self.announced.iter().any(|n| n == &format!("stick:{}", pad.name)) {
+                log::info!("game controller {}: left stick {x:.2}, steers: {} (Apple GameController)", pad.name, out.steering.is_none());
+                self.announced.push(format!("stick:{}", pad.name));
+            }
+            if out.steering.is_none() {
+                out.steering = Some(if x.abs() < dz.max(0.08) { 0.0 } else { x });
+                out.stick = true;
+            }
+            out.throttle.get_or_insert(crate::settings::pedal_curve(pad.axes[5], self.pedal_throttle));
+            out.brake.get_or_insert(crate::settings::pedal_curve(pad.axes[4], self.pedal_brake));
+        }
         let di = self.devices.direct_input();
         let off = self.disabled.clone();
         if let Some(g) = self.devices.gilrs.as_ref() {

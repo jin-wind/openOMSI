@@ -77,7 +77,7 @@ mkdir -p "$app"
 
 xcrun --sdk "$sdk_name" clang \
     -arch arm64 -isysroot "$sdk" "-$min_flag_name=$min_ios" \
-    ios/main.m "$CARGO_TARGET_DIR/$target/release/libopenomsi_game.a" \
+    -fobjc-arc ios/main.m ios/game_controller.m "$CARGO_TARGET_DIR/$target/release/libopenomsi_game.a" \
     -framework UIKit -framework Foundation -framework Metal -framework QuartzCore \
     -framework CoreGraphics -framework CoreAudio -framework AudioToolbox \
     -framework GameController -framework Security -framework SystemConfiguration \

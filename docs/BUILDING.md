@@ -69,6 +69,16 @@ in the separate `openOMSI/Content` folder; the signed app bundle is not writable
 Diagnostics are written to `openOMSI/Content/Logs/game.log`; the preceding app launch is
 kept as `game-prev.log` in the same folder. Neither file includes the original game assets.
 
+Xbox and other extended gamepads use Apple's GameController framework on iOS. Connect
+the controller to the iPhone/iPad, or to the Mac for Simulator testing. Keep the Simulator
+window in front. The left stick steers, RT accelerates and LT brakes. Default buttons:
+A opens/closes the front door; B toggles the parking brake; X holds the horn; Y starts or
+shuts down the bus; LB/RB toggle indicators; View changes camera; Menu pauses; D-pad
+up/left/down selects D/N/R, and D-pad right operates the second door. L-stick click resets
+the view; R-stick click toggles the stop brake. Gear defaults target automatic buses;
+custom axes and buttons can be assigned in Controls. Force feedback is not implemented
+for this backend. `OMSI_CONTROLLER_TRACE=1` logs stick/trigger changes for Simulator tests.
+
 ## The programs
 
 * `openomsi` (`crates/omsi-app`) - the game. Started with no arguments it opens the launcher

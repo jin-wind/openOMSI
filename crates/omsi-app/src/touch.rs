@@ -888,6 +888,48 @@ impl App {
         }
     }
 
+    /// The native iOS gamepad uses the same bus-independent buttons as the touch UI.
+    #[cfg(target_os = "ios")]
+    pub(crate) fn gamepad_action(&mut self, event_loop: &ActiveEventLoop, action: &str, down: bool) -> bool {
+        let button = match action {
+            "pad_door_1" => Btn::Door(1),
+            "pad_door_2" => Btn::Door(2),
+            "pad_parking_brake" => Btn::ParkingBrake,
+            "pad_horn" => Btn::Horn,
+            "pad_auto_start" => Btn::AutoStart,
+            "pad_blink_left" => Btn::BlinkLeft,
+            "pad_blink_right" => Btn::BlinkRight,
+            "pad_camera" => Btn::Camera,
+            "pad_pause" => Btn::Pause,
+            "pad_look_reset" => Btn::LookReset,
+            "pad_stop_brake" => Btn::StopBrake,
+            "pad_drive" => Btn::Gear("automatic_D", "D"),
+            "pad_reverse" => Btn::Gear("automatic_R", "R"),
+            "pad_neutral" => Btn::Gear("automatic_N", "N"),
+            _ => return false,
+        };
+        // Releases must reach held horns and doors even when a menu has opened.
+        if (!down || self.game_menu.is_none()) && (down || button.held()) {
+            self.touch_button(event_loop, button, down);
+        }
+        true
+    }
+
+    #[cfg(target_os = "ios")]
+    pub(crate) fn release_gamepad_controls(&mut self, event_loop: &ActiveEventLoop) {
+        let actions = if let Some(controllers) = self.controllers.as_mut() {
+            controllers.set_focus(false);
+            controllers.poll();
+            std::mem::take(&mut controllers.actions)
+        } else { Vec::new() };
+        for (action, down) in actions {
+            if !down && !self.gamepad_action(event_loop, &action, false) {
+                if let Some(player) = self.player.as_mut() { player.action(&action, false); }
+            }
+        }
+        self.pad_look = [false; 4];
+    }
+
     /// Once a frame before the bus moves: the wheel and the pedals as the controller's axes
     /// (the stronger of the two for the pedals), and the wheel coming back when let go.
     pub(crate) fn touch_frame(&mut self, dt: f32) {

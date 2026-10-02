@@ -49,6 +49,8 @@ impl ApplicationHandler for App {
     /// A phone put the app into the background: its window's surface goes (made again on
     /// `resumed`), the fingers and the held keys are let go.
     fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "ios")]
+        self.release_gamepad_controls(event_loop);
         self.cancel_touches(event_loop);
         self.surface = None;
         self.touch.drop_gpu();
@@ -80,6 +82,8 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Focused(false) => {
+                #[cfg(target_os = "ios")]
+                self.release_gamepad_controls(event_loop);
                 self.cancel_touches(event_loop);
                 self.finish_vr_nav_edit();
                 self.window_focused = false;
@@ -751,14 +755,19 @@ impl ApplicationHandler for App {
                 // the controller's view buttons are the game's, not the bus's: looking around
                 // while held (`view_look_*`), and OMSI's view actions (other cameras, views)
                 let mut actions = actions;
+                #[cfg(target_os = "ios")]
+                actions.retain(|(name, down)| !self.gamepad_action(event_loop, name, *down));
+                actions.retain(|(name, down)| {
+                    if let Some(k) = ["view_look_left", "view_look_right", "view_look_up", "view_look_down"].iter().position(|action| name.eq_ignore_ascii_case(action)) {
+                        if !*down || self.game_menu.is_none() { self.pad_look[k] = *down; }
+                        return false;
+                    }
+                    true
+                });
                 if self.game_menu.is_none() {
                     let mut game: Vec<String> = Vec::new();
                     actions.retain(|(name, down)| {
                         let n = name.to_ascii_lowercase();
-                        if let Some(k) = ["view_look_left", "view_look_right", "view_look_up", "view_look_down"].iter().position(|x| *x == n) {
-                            self.pad_look[k] = *down;
-                            return false;
-                        }
                         if n == "gear_up" || n == "gear_down" {
                             if *down {
                                 game.push(n);
@@ -787,8 +796,8 @@ impl ApplicationHandler for App {
                     p.axes.red_steer_spd = self.settings.red_steer_spd;
                     p.axes.pedal_hold = self.settings.brake_hold;
                     p.analog = analog;
-                    if self.game_menu.is_none() {
-                        for (name, down) in actions {
+                    for (name, down) in actions {
+                        if self.game_menu.is_none() || !down {
                             p.action(&name, down);
                         }
                     }
