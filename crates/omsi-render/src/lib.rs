@@ -1448,7 +1448,7 @@ impl Default for RenderOptions {
 /// million pixels, a 4K screen showed a picture of 58 % its size, and the enhanced
 /// graphics looked like textures of low quality; the frame-rate governor still steps down
 /// on a card that cannot keep up.
-pub const AUTO_SCALE_PIXELS: f32 = if cfg!(target_os = "macos") || cfg!(target_os = "android") { 2_800_000.0 } else { 8_400_000.0 };
+pub const AUTO_SCALE_PIXELS: f32 = if cfg!(any(target_os = "macos", target_os = "android", target_os = "ios")) { 2_800_000.0 } else { 8_400_000.0 };
 
 /// Interior lamps one mesh may be lit by (OMSI: four; a model may list more in its
 /// `[illumination_interior]`), and the step of the lamp code sent to the shaders (`first *
@@ -1605,7 +1605,7 @@ impl Renderer {
         let weak = !full
             && (info.backend == wgpu::Backend::Gl
                 // (a phone's chip, whatever type its driver reports: some say "other")
-                || cfg!(target_os = "android")
+                || cfg!(any(target_os = "android", target_os = "ios"))
                 || (info.device_type == wgpu::DeviceType::IntegratedGpu && info.backend != wgpu::Backend::Metal)
                 || vram.is_some_and(|v| v <= 2560));
         let modest = !full && !weak && vram.is_some_and(|v| v <= 4200);
@@ -1654,7 +1654,7 @@ impl Renderer {
                     let formats = s.get_capabilities(&adapter).formats;
                     // (an Android driver lists the plain RGBA8 first: the picture, written in
                     // linear light for an sRGB target, came out dark and flat)
-                    if cfg!(target_os = "android") {
+                    if cfg!(any(target_os = "android", target_os = "ios")) {
                         if let Some(f) = formats.iter().find(|f| f.is_srgb()) {
                             return *f;
                         }
@@ -2821,7 +2821,7 @@ impl Renderer {
             sky_pipeline: sky_pipeline_for(format, "fs_main"),
         };
         // the enhanced path: its own lighting in all three
-        let leave_out_enhanced = options.no_enhanced && (cfg!(target_os = "android") || adapter_name.to_ascii_lowercase().contains("opengl") || GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed));
+        let leave_out_enhanced = options.no_enhanced && (cfg!(any(target_os = "android", target_os = "ios")) || adapter_name.to_ascii_lowercase().contains("opengl") || GL_BACKEND.load(std::sync::atomic::Ordering::Relaxed));
         let hdr_pass = (!leave_out_enhanced).then(|| PassPipelines {
             pipelines: scene_pipelines(hdr_format, "fs_enhanced"),
             corona_pipeline: corona_pipeline_for(hdr_format, "fs_enhanced", additive),
@@ -10387,7 +10387,7 @@ fn scene_scale_for(requested: f32, width: u32, height: u32) -> f32 {
     let pixels = width as f32 * height as f32;
     if requested > 0.0 {
         let requested = requested.clamp(0.5, 1.0);
-        if (cfg!(target_os = "macos") || cfg!(target_os = "android")) && pixels > AUTO_SCALE_PIXELS {
+        if cfg!(any(target_os = "macos", target_os = "android", target_os = "ios")) && pixels > AUTO_SCALE_PIXELS {
             return requested.min((AUTO_SCALE_PIXELS / pixels).sqrt().clamp(0.5, 1.0));
         }
         return requested;
@@ -11287,7 +11287,7 @@ mod tests {
         assert_eq!(scene_scale_for(0.0, 2560, 1080), 1.0);
         // Mac/Android cap this at 2.8 million pixels; desktops keep it at full size.
         let s = scene_scale_for(0.0, 3200, 1800);
-        if cfg!(target_os = "macos") || cfg!(target_os = "android") {
+        if cfg!(any(target_os = "macos", target_os = "android", target_os = "ios")) {
             assert!((s - 0.697).abs() < 0.01, "{s}");
             assert!((3200.0 * s * 1800.0 * s - AUTO_SCALE_PIXELS).abs() < 1.0);
         } else {
@@ -11298,7 +11298,7 @@ mod tests {
         // what is asked for, within 0.5..1 - on a Mac or a phone a scale over the pixel
         // budget is capped like the automatic one
         let s = scene_scale_for(0.75, 3200, 1800);
-        if cfg!(target_os = "macos") || cfg!(target_os = "android") {
+        if cfg!(any(target_os = "macos", target_os = "android", target_os = "ios")) {
             assert!((s - 0.697).abs() < 0.01, "{s}");
             assert!((3200.0 * s * 1800.0 * s - AUTO_SCALE_PIXELS).abs() < 1.0);
         } else {

@@ -159,7 +159,7 @@ pub fn omsi_options(root: &Path) -> Option<OmsiOptions> {
     let mut v = json!({});
     let num = |k: &str| o.str(k).and_then(|x| x.trim().replace(',', ".").parse::<f64>().ok()).filter(|x| x.is_finite());
     // (not on a phone: the PC's OMSI caps at 30, and a phone played at 30 frames)
-    if let Some(x) = num("maxfps").filter(|_| !cfg!(target_os = "android")) {
+    if let Some(x) = num("maxfps").filter(|_| !cfg!(any(target_os = "android", target_os = "ios"))) {
         v["max_fps"] = json!(x.max(0.0) as i64);
     }
     if let Some(x) = num("performance_minobjsize") {
@@ -1786,7 +1786,7 @@ pub fn option_presets() -> Vec<(String, Value)> {
         let Ok(o) = omsi_content::options::Options::load(&f) else { continue };
         let name = f.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let mut v = json!({});
-        if !cfg!(target_os = "android") {
+        if !cfg!(any(target_os = "android", target_os = "ios")) {
             v["max_fps"] = json!(o.i32("maxfps", 0).max(0));
         }
         v["min_obj_size"] = json!(o.f32("performance_minobjsize", 0.013) as f64);
@@ -2246,7 +2246,7 @@ pub fn cleanup() {
 /// Native folder / file picker (Finder, Explorer, the GTK dialog) for a mod. Must run on
 /// the main thread. (None on a phone: the launcher browses the storage itself there.)
 pub fn pick_mod(zip: bool) -> Option<PathBuf> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         if zip {
             rfd::FileDialog::new().set_title("Choose a mod archive").add_filter("Mod archive", &["zip", "7z", "rar"]).pick_file()
@@ -2254,7 +2254,7 @@ pub fn pick_mod(zip: bool) -> Option<PathBuf> {
             rfd::FileDialog::new().set_title("Choose the mod folder").pick_folder()
         }
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = zip;
         None
@@ -2263,11 +2263,11 @@ pub fn pick_mod(zip: bool) -> Option<PathBuf> {
 
 /// Folder picker (Setup: the OMSI 2 folder).
 pub fn pick_folder(title: &str) -> Option<PathBuf> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         rfd::FileDialog::new().set_title(title).pick_folder()
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = title;
         None
@@ -2276,11 +2276,11 @@ pub fn pick_folder(title: &str) -> Option<PathBuf> {
 
 /// File picker (Setup: the game program).
 pub fn pick_file(title: &str) -> Option<PathBuf> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         rfd::FileDialog::new().set_title(title).pick_file()
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = title;
         None
@@ -2298,7 +2298,7 @@ pub fn take_in_process_launch() -> Option<Vec<String>> {
 }
 
 /// Whether games run inside the launcher's own process (a phone).
-pub const IN_PROCESS_GAMES: bool = cfg!(target_os = "android");
+pub const IN_PROCESS_GAMES: bool = cfg!(any(target_os = "android", target_os = "ios"));
 
 pub use instances::{list as list_instances, log_tail, stop as stop_instance, Instance};
 

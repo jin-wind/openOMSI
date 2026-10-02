@@ -180,7 +180,7 @@ pub(crate) fn graphics_instance() -> wgpu::Instance {
 /// (`graphics_api`) or OMSI_BACKEND=vulkan|dx12|gl puts one first: a driver whose Vulkan
 /// misbehaves is got round.
 pub(crate) fn backend_order() -> Vec<wgpu::Backends> {
-    if cfg!(target_os = "macos") {
+    if cfg!(any(target_os = "macos", target_os = "ios")) {
         return vec![wgpu::Backends::METAL];
     }
     let settings = crate::settings::Settings::load();

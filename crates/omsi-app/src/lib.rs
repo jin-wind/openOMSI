@@ -18,6 +18,8 @@ mod openxr;
 mod mac_hid;
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+mod mobile_shell;
 mod platform;
 mod touch;
 mod placing;
@@ -197,6 +199,18 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+/// Entry point used by the small UIKit host when the game is built for iOS.
+///
+/// Winit's iOS event loop owns `UIApplicationMain`, so the Xcode executable must call
+/// this function from its C `main` instead of starting a second UIKit application loop.
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn start_winit_app() {
+    if let Err(e) = run() {
+        eprintln!("openOMSI: {e:#}");
+    }
+}
+
 /// The showroom is drawn the way the game will be.
 pub(crate) fn launcher_statics() {
     let s = settings::Settings::load();
@@ -268,7 +282,7 @@ pub(crate) fn prepare(mut args: Args, bare: bool) -> Result<Option<(Args, Option
                 } else {
                     fatal_dialog("openOMSI cannot start", &text);
                 }
-                if cfg!(target_os = "android") {
+                if cfg!(any(target_os = "android", target_os = "ios")) {
                     // (a phone's app is not ended from inside: back to the launcher)
                     return Ok(None);
                 }

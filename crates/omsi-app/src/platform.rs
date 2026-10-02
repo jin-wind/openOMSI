@@ -8,7 +8,34 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use winit::event_loop::ActiveEventLoop;
 
 /// Built for a phone or a tablet.
-pub const MOBILE: bool = cfg!(target_os = "android");
+pub const MOBILE: bool = cfg!(any(target_os = "android", target_os = "ios"));
+
+/// UIKit chooses the phone's screen size; desktop dimensions would make an oversized
+/// UIWindow and crop most of the interface off screen.
+pub(crate) fn window_attributes(attrs: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+    #[cfg(target_os = "ios")]
+    {
+        use winit::platform::ios::{ValidOrientations, WindowAttributesExtIOS};
+        let mut attrs = attrs;
+        attrs.inner_size = None;
+        attrs.with_valid_orientations(ValidOrientations::Landscape)
+            .with_prefers_status_bar_hidden(true)
+            .with_prefers_home_indicator_hidden(true)
+    }
+    #[cfg(not(target_os = "ios"))]
+    { attrs }
+}
+
+/// Winit reports UIKit's safe area as the inner rectangle, but touches and the Metal
+/// layer use the full window. The launcher keeps its controls inside this inset.
+pub(crate) fn ui_origin(window: &winit::window::Window) -> glam::Vec2 {
+    #[cfg(target_os = "ios")]
+    if let (Ok(inner), Ok(outer)) = (window.inner_position(), window.outer_position()) {
+        return glam::Vec2::new((inner.x - outer.x) as f32, (inner.y - outer.y) as f32);
+    }
+    let _ = window;
+    glam::Vec2::ZERO
+}
 
 /// The session asked to end (a phone: back to the launcher, the program runs on).
 static LEAVE: AtomicBool = AtomicBool::new(false);

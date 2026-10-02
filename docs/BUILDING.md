@@ -21,6 +21,10 @@ there.
 * **Android**: the `aarch64-linux-android` Rust target, JDK 17, and an Android SDK with
   platform 34 or newer, build-tools and the NDK. `scripts/build-android.sh` looks for them
   through `android/env.sh` (`ANDROID_HOME`, `ANDROID_NDK_HOME`).
+* **iOS**: Xcode and the `aarch64-apple-ios` Rust target. `scripts/build-ios.sh` makes an
+  arm64 `openOMSI.app` using Metal. It is ad-hoc signed for local inspection; device/App
+  Store installation needs an Apple signing identity and provisioning profile. Set
+  `IOS_PLATFORM=iphonesimulator` to build the arm64 Simulator bundle instead.
 
 ## Build
 
@@ -31,6 +35,7 @@ there.
 | Windows, from a Mac | `scripts/build-windows-cross.sh` (needs `brew install mingw-w64`) | `dist/windows/` |
 | Linux | `scripts/build-linux.sh` | `dist/linux/openomsi`, `openomsi-launcher`, `.desktop` file |
 | Android | `scripts/build-android.sh` | `dist/android/openOMSI-<version>.apk` |
+| iOS | `scripts/build-ios.sh` | `dist/ios/openOMSI.app` |
 | Dedicated server | `scripts/build-server.sh [folder]` | `dist/server/` with `start.sh` |
 | 32-bit plugin host | `scripts/build-plugin-host.sh` | `dist/omsi-plugin-host32.exe` (see [PLUGINS.md](PLUGINS.md)) |
 

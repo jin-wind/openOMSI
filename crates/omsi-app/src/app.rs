@@ -336,7 +336,7 @@ impl App {
         }
         let window = match given {
             Some(w) => w,
-            None => Arc::new(event_loop.create_window(attrs).expect("window")),
+            None => Arc::new(event_loop.create_window(crate::platform::window_attributes(attrs)).expect("window")),
         };
         let mut renderer = match window_renderer(&mut self.instance, &window, self.settings.render_options()) {
             Ok(r) => r,

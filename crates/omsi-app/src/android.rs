@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use winit::platform::android::activity::AndroidApp;
 use winit::platform::android::EventLoopBuilderExtAndroid;
 
-/// Whether the first drive of this run was already started (see `Shell::switch`).
+/// Whether the first drive of this run was already started.
 static SAFER_TRIED: AtomicBool = AtomicBool::new(false);
 
 /// Where the app keeps what a person puts on the phone for it.
@@ -82,7 +82,7 @@ fn android_main(app: AndroidApp) {
             return;
         }
     };
-    let mut shell = Shell { launcher: None, game: None, instance: None };
+    let mut shell = crate::mobile_shell::Shell::default();
     if let Err(e) = event_loop.run_app(&mut shell) {
         log::error!("{e}");
     }
@@ -188,7 +188,7 @@ pub(crate) fn previous_run_crash() -> Option<(String, String)> {
 /// every folder of the content folder gets one except `Screenshots` (those are pictures to
 /// find), and so does the OMSI installation when it lies somewhere else. Nothing of the
 /// content is moved or changed.
-fn hide_from_gallery(content: &Path) {
+pub(crate) fn hide_from_gallery(content: &Path) {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(content)
         .into_iter()
         .flatten()
@@ -231,162 +231,34 @@ a folder or a .zip, .7z or .rar from the launcher's Mods page. Screenshots are w
 The folders here hold a .nomedia file so that the gallery leaves the game's textures alone:\n\
 they are not photos - deleting them breaks buses and maps.\n";
 
-/// The launcher, or the game in the launcher's window.
-struct Shell {
-    launcher: Option<Box<launcher::Launcher>>,
-    game: Option<Box<App>>,
-    instance: Option<()>,
-}
-
-impl Shell {
-    fn launcher(&mut self) -> &mut launcher::Launcher {
-        if self.launcher.is_none() {
-            // the original installation and the content roots, as a bare start finds them
-            let args = Args::parse_from(["openomsi"]);
-            if let Err(e) = prepare(args, true) {
-                log::error!("{e:#}");
-            }
-            // (an installation chosen under Setup is known from here on)
-            if let Some(content) = crate::startup::content_dir() {
-                hide_from_gallery(&content);
-            }
-            launcher_statics();
-            self.instance = Some(());
-            self.launcher = Some(Box::new(launcher::Launcher::new(graphics_instance())));
-        }
-        self.launcher.as_mut().unwrap()
-    }
-
-    /// After every event: a game the launcher asked for starts, a game that ended gives
-    /// the window back.
-    fn switch(&mut self, event_loop: &ActiveEventLoop) {
-        if self.game.is_some() {
-            if !crate::platform::take_leave() {
-                return;
-            }
-            let mut game = self.game.take().unwrap();
-            game.exiting(event_loop);
-            let window = game.window.take();
-            drop(game);
-            lan_mods::clean_up();
-            log::info!("session ended: back to the launcher");
-            let l = self.launcher();
-            if let Some(w) = window {
-                l.adopt_window(w);
-            }
-            l.resumed(event_loop);
-            return;
-        }
-        let Some(line) = omsi_launcher_lib::take_in_process_launch() else { return };
-        // the first drive after a run that closed in the middle of one (a graphics driver
-        // that took the process down) starts with safer graphics, and on OpenGL when that
-        // run drew with Vulkan: a phone whose Vulkan driver fails on the game still plays
-        if !SAFER_TRIED.swap(true, Ordering::Relaxed) && previous_run_crash().is_some() {
-            let prev = std::fs::read_to_string(omsi_launcher_lib::data_dir().join("game-prev.log")).unwrap_or_default();
-            let vulkan = prev.lines().any(|l| l.contains("renderer: ") && l.contains("(Vulkan)")) || prev.lines().any(|l| l.contains("graphics: ") && l.to_ascii_uppercase().contains("VULKAN"));
-            std::env::set_var("OMSI_SAFE_GPU", "1");
-            // It went down while the graphics driver compiled the shaders (the last it said
-            // was a stage of that): the phone's Vulkan driver cannot take them, and will not
-            // next time either (the Maleoon and several Mali drivers after the cloud noise,
-            // #229, #278). OpenGL from now on, in the settings - Settings → Graphics API
-            // takes it back.
-            let last = prev.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
-            let compiling = last.contains("renderer: compiling") || last.contains("cloud noise made") || last.contains("opening graphics device") || last.contains("compiling renderer pipelines");
-            if vulkan && compiling {
-                if let Ok(mut v) = omsi_launcher_lib::get_settings() {
-                    v["graphics_api"] = serde_json::json!("gl");
-                    match omsi_launcher_lib::save_settings(&v) {
-                        Ok(()) => log::warn!("the graphics driver went down compiling the shaders on Vulkan: OpenGL from now on (Settings → Graphics API)"),
-                        Err(e) => log::warn!("settings not saved: {e:#}"),
-                    }
+pub(crate) fn prepare_drive() {
+    // the first drive after a run that closed in the middle of one (a graphics driver
+    // that took the process down) starts with safer graphics, and on OpenGL when that
+    // run drew with Vulkan: a phone whose Vulkan driver fails on the game still plays
+    if !SAFER_TRIED.swap(true, Ordering::Relaxed) && previous_run_crash().is_some() {
+        let prev = std::fs::read_to_string(omsi_launcher_lib::data_dir().join("game-prev.log")).unwrap_or_default();
+        let vulkan = prev.lines().any(|l| l.contains("renderer: ") && l.contains("(Vulkan)")) || prev.lines().any(|l| l.contains("graphics: ") && l.to_ascii_uppercase().contains("VULKAN"));
+        std::env::set_var("OMSI_SAFE_GPU", "1");
+        // It went down while the graphics driver compiled the shaders (the last it said
+        // was a stage of that): the phone's Vulkan driver cannot take them, and will not
+        // next time either (the Maleoon and several Mali drivers after the cloud noise,
+        // #229, #278). OpenGL from now on, in the settings - Settings → Graphics API
+        // takes it back.
+        let last = prev.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+        let compiling = last.contains("renderer: compiling") || last.contains("cloud noise made") || last.contains("opening graphics device") || last.contains("compiling renderer pipelines");
+        if vulkan && compiling {
+            if let Ok(mut v) = omsi_launcher_lib::get_settings() {
+                v["graphics_api"] = serde_json::json!("gl");
+                match omsi_launcher_lib::save_settings(&v) {
+                    Ok(()) => log::warn!("the graphics driver went down compiling the shaders on Vulkan: OpenGL from now on (Settings → Graphics API)"),
+                    Err(e) => log::warn!("settings not saved: {e:#}"),
                 }
             }
-            if vulkan && std::env::var_os("OMSI_BACKEND").is_none() {
-                std::env::set_var("OMSI_BACKEND", "gl");
-            }
-            log::warn!("the last run closed in the middle of a drive: this one starts with safer graphics{}", if vulkan { " on OpenGL" } else { "" });
         }
-        log::info!("starting the game: {}", line.join(" "));
-        let argv: Vec<String> = std::iter::once("openomsi".to_string()).chain(line).collect();
-        let args = match Args::try_parse_from(&argv) {
-            Ok(a) => a,
-            Err(e) => {
-                log::error!("the launcher's command line: {e}");
-                return;
-            }
-        };
-        let game = prepare(args, false).and_then(|p| match p {
-            Some((args, server)) => make_app(args, server),
-            None => Ok(None),
-        });
-        let mut app = match game {
-            Ok(Some(app)) => app,
-            Ok(None) => return,
-            Err(e) => {
-                log::error!("the game could not start: {e:#}");
-                return;
-            }
-        };
-        let window = self.launcher().release_window();
-        app.create_window(event_loop, window);
-        self.game = Some(Box::new(app));
-    }
-}
-
-impl ApplicationHandler for Shell {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        log::info!("app in front");
-        match self.game.as_mut() {
-            Some(g) => g.resumed(event_loop),
-            None => self.launcher().resumed(event_loop),
+        if vulkan && std::env::var_os("OMSI_BACKEND").is_none() {
+            std::env::set_var("OMSI_BACKEND", "gl");
         }
-        self.switch(event_loop);
-    }
-
-    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
-        // (the system may end an app in the background without a word: see
-        // `previous_run_crash`)
-        log::info!("app in the background");
-        match self.game.as_mut() {
-            Some(g) => g.suspended(event_loop),
-            None => self.launcher().suspended(event_loop),
-        }
-    }
-
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        match self.game.as_mut() {
-            Some(g) => g.window_event(event_loop, id, event),
-            None => self.launcher().window_event(event_loop, id, event),
-        }
-        self.switch(event_loop);
-    }
-
-    fn device_event(&mut self, event_loop: &ActiveEventLoop, id: winit::event::DeviceId, event: DeviceEvent) {
-        if let Some(g) = self.game.as_mut() {
-            g.device_event(event_loop, id, event);
-        }
-    }
-
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        match self.game.as_mut() {
-            Some(g) => {
-                event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-                g.about_to_wait(event_loop)
-            }
-            None => self.launcher().about_to_wait(event_loop),
-        }
-        self.switch(event_loop);
-    }
-
-    fn memory_warning(&mut self, _event_loop: &ActiveEventLoop) {
-        log::warn!("the system is short of memory");
-        crate::memory::release_free_memory();
-    }
-
-    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(g) = self.game.as_mut() {
-            g.exiting(event_loop);
-        }
+        log::warn!("the last run closed in the middle of a drive: this one starts with safer graphics{}", if vulkan { " on OpenGL" } else { "" });
     }
 }
 

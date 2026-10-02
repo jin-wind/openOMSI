@@ -64,15 +64,15 @@ const PAGES: [(Page, &str, &str); 10] = [
     (Page::Setup, "Setup", "folder_open"),
 ];
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 type Clipboard = arboard::Clipboard;
 
 /// A phone: text copied in the launcher can be pasted in it (the system's clipboard is
 /// Java's).
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 struct Clipboard(String);
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 impl Clipboard {
     fn new() -> Result<Clipboard, ()> {
         Ok(Clipboard(String::new()))
@@ -150,7 +150,10 @@ pub struct Launcher {
 /// Run the launcher window until it is closed.
 pub fn run(instance: wgpu::Instance) -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
+    #[cfg(not(target_os = "ios"))]
     let mut app = Launcher::new(instance);
+    #[cfg(target_os = "ios")]
+    let mut app = crate::mobile_shell::Shell::with_launcher(Launcher::new(instance));
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -211,7 +214,7 @@ impl Launcher {
         update: Default::default(),
     };
     // after an update: the files it set aside go, and the launcher says what happened
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     crate::updater::cleanup_after_update();
     if let Some(v) = crate::updater::just_updated() {
         log::info!("update: this start follows the update to {v}");
@@ -338,7 +341,7 @@ impl ApplicationHandler for Launcher {
         if omsi_cfg::env::var_os("OMSI_BACKGROUND").is_some() {
             attrs = attrs.with_active(false);
         }
-        let window = match event_loop.create_window(attrs) {
+        let window = match event_loop.create_window(crate::platform::window_attributes(attrs)) {
             Ok(w) => Arc::new(w),
             Err(e) => {
                 crate::startup::fatal_message(&format!("openOMSI cannot open its window: {e}"));
@@ -403,7 +406,8 @@ impl ApplicationHandler for Launcher {
                 self.ui.input.alt = self.modifiers.alt_key();
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let p = Vec2::new(position.x as f32, position.y as f32) / scale;
+                let origin = self.window.as_ref().map(|w| crate::platform::ui_origin(w)).unwrap_or(Vec2::ZERO);
+                let p = (Vec2::new(position.x as f32, position.y as f32) - origin) / scale;
                 if let Some(last) = self.dragging {
                     let d = p - last;
                     self.showroom.orbit(d.x, d.y);
@@ -645,6 +649,11 @@ impl Launcher {
         let phys = window.inner_size();
         let (pw, ph) = (phys.width.max(1), phys.height.max(1));
         let size = Vec2::new(pw as f32, ph as f32) / scale;
+        #[cfg(target_os = "ios")]
+        let (pw, ph) = {
+            let full = window.outer_size();
+            (full.width.max(1), full.height.max(1))
+        };
 
         self.run_script();
         self.state.update(dt);
@@ -682,6 +691,24 @@ impl Launcher {
             }
         }
         let (layers, verts, ranges) = self.ui.finish();
+        #[cfg(target_os = "ios")]
+        let (layers, verts) = {
+            let origin = crate::platform::ui_origin(&window);
+            let mut layers = layers;
+            let mut verts = verts;
+            for vertex in &mut verts {
+                vertex.pos[0] += origin.x / scale;
+                vertex.pos[1] += origin.y / scale;
+            }
+            for layer in &mut layers {
+                layer.viewport = [0.0, 0.0, pw as f32 / scale, ph as f32 / scale];
+                layer.clip[0] += origin.x;
+                layer.clip[1] += origin.y;
+                layer.clip[2] += origin.x;
+                layer.clip[3] += origin.y;
+            }
+            (layers, verts)
+        };
         self.touch_frame();
 
         // --- to the GPU: the preview when it changed, then the interface onto the window
@@ -729,6 +756,11 @@ impl Launcher {
         }
         let Some(renderer) = self.renderer.as_mut() else { return };
         let surface = self.surface.as_mut().unwrap();
+        // UIKit's safe-area size can differ from an earlier Resized event's dimensions.
+        // Match the swapchain to the dimensions used by the UI's MSAA resolve pass.
+        if surface.config.width != pw || surface.config.height != ph {
+            surface.resize(renderer, pw, ph);
+        }
         let frame = match surface.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {

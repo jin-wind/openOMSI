@@ -65,6 +65,12 @@ pub struct Browser {
 
 /// The places a phone keeps files: the shared storage and any card or stick.
 pub fn storage_roots() -> Vec<(String, PathBuf)> {
+    #[cfg(target_os = "ios")]
+    {
+        return std::env::var_os("HOME").map(|h| vec![("Documents".to_string(), PathBuf::from(h).join("Documents"))]).unwrap_or_default();
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
     let mut v = Vec::new();
     let shared = PathBuf::from("/storage/emulated/0");
     if shared.is_dir() {
@@ -87,6 +93,7 @@ pub fn storage_roots() -> Vec<(String, PathBuf)> {
         }
     }
     v
+    }
 }
 
 impl Browser {
@@ -146,7 +153,8 @@ impl Launcher {
     /// scrolls (the list under it, else the page), a drag over the bus turns it and two
     /// fingers over it zoom.
     pub(super) fn touch(&mut self, t: Touch, scale: f32) {
-        let p = Vec2::new(t.location.x as f32, t.location.y as f32) / scale;
+        let origin = self.window.as_ref().map(|w| crate::platform::ui_origin(w)).unwrap_or(Vec2::ZERO);
+        let p = (Vec2::new(t.location.x as f32, t.location.y as f32) - origin) / scale;
         self.last_input = std::time::Instant::now();
         self.ui.input.touch = true;
         match t.phase {

@@ -62,7 +62,7 @@ rust-i18n = "4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # the desktop's clipboard and file dialogs (a phone has neither in this form)
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 arboard = { version = "3", default-features = false }
 rfd = "0.15"
 

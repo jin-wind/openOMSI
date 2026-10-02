@@ -413,6 +413,10 @@ impl App {
             return;
         }
         let p = Vec2::new(f.location.x as f32, f.location.y as f32);
+        if f.phase == TouchPhase::Started && omsi_cfg::env::var_os("OMSI_TOUCH_TRACE").is_some() {
+            log::info!("touch: {p:?}, layout {:?}, window {:?}", self.touch.size,
+                self.window.as_ref().map(|w| (w.inner_size(), w.outer_size(), crate::platform::ui_origin(w))));
+        }
         match f.phase {
             TouchPhase::Started => self.finger_down(event_loop, f.id, p),
             TouchPhase::Moved => self.finger_move(f.id, p),
@@ -454,6 +458,9 @@ impl App {
                 Role::Look
             }
         };
+        if omsi_cfg::env::var_os("OMSI_TOUCH_TRACE").is_some() {
+            log::info!("touch down: {p:?} -> {role:?}");
+        }
         match role {
             Role::Button(_, b) => {
                 if b.held() {
